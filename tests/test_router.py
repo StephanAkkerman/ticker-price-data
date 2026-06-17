@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ticker_price_data.router import get_price
+from ticker_price_data.router import get_price, get_ticker
 
 STOCK_QUOTE = {"price": 185.0, "source": "yahoo"}
 CRYPTO_QUOTE = {"price": 65000.0, "source": "coingecko"}
@@ -120,3 +120,102 @@ async def test_get_price_auto_none_classification_falls_back_to_stock():
 @pytest.mark.asyncio
 async def test_get_price_empty_ticker_returns_none():
     assert await get_price("", "auto") is None
+
+
+# ---------------------------------------------------------------------------
+# get_ticker — classification metadata + quote in one call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_equity_merges_metadata_and_quote():
+    classifier = FakeClassifier(
+        {
+            "category": "EQUITY",
+            "ticker": "AAPL",
+            "name": "Apple Inc.",
+            "market_cap": 3_000_000_000_000,
+            "sector": "Technology",
+            "industry": "Consumer Electronics",
+            "company_profile": {"sector": "Technology"},
+            "yahoo_lookup": "AAPL",
+            "alternatives": [],
+        }
+    )
+    with patch(
+        "ticker_price_data.router.get_stock_info",
+        new=AsyncMock(return_value=STOCK_QUOTE),
+    ) as mock_stock:
+        result = await get_ticker("AAPL", classifier=classifier)
+
+    mock_stock.assert_awaited_once_with("AAPL")
+    assert result["ticker"] == "AAPL"
+    assert result["category"] == "EQUITY"
+    assert result["name"] == "Apple Inc."
+    assert result["market_cap"] == 3_000_000_000_000
+    assert result["sector"] == "Technology"
+    assert result["industry"] == "Consumer Electronics"
+    assert result["company_profile"] == {"sector": "Technology"}
+    assert result["quote"] == STOCK_QUOTE
+    # TickerInfo exposes our own shape, not raw classifier internals.
+    assert "yahoo_lookup" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_crypto_uses_crypto_quote():
+    classifier = FakeClassifier(
+        {"category": "CRYPTO", "ticker": "BTC", "name": "Bitcoin", "market_cap": 1}
+    )
+    with patch(
+        "ticker_price_data.router.get_crypto_info",
+        new=AsyncMock(return_value=CRYPTO_QUOTE),
+    ) as mock_crypto:
+        result = await get_ticker("bitcoin", classifier=classifier)
+
+    mock_crypto.assert_awaited_once_with("BTC")
+    assert result["category"] == "CRYPTO"
+    assert result["quote"] == CRYPTO_QUOTE
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_unknown_classification_best_effort():
+    classifier = FakeClassifier(None)
+    with (
+        patch(
+            "ticker_price_data.router.get_stock_info",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "ticker_price_data.router.get_crypto_info",
+            new=AsyncMock(return_value=CRYPTO_QUOTE),
+        ),
+    ):
+        result = await get_ticker("XYZ", classifier=classifier)
+
+    assert result["category"] == "UNKNOWN"
+    assert result["ticker"] == "XYZ"
+    assert result["sector"] is None
+    assert result["quote"] == CRYPTO_QUOTE
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_returns_none_when_unknown_and_no_quote():
+    classifier = FakeClassifier(None)
+    with (
+        patch(
+            "ticker_price_data.router.get_stock_info",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "ticker_price_data.router.get_crypto_info",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        result = await get_ticker("XYZ", classifier=classifier)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_empty_returns_none():
+    assert await get_ticker("") is None

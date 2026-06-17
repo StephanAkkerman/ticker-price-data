@@ -1,9 +1,9 @@
 """Unified ticker price data from Yahoo Finance, CoinGecko, and TradingView."""
 
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 from .coingecko import get_crypto_info
-from .router import get_price, get_shared_classifier
+from .router import get_price, get_shared_classifier, get_ticker
 from .tradingview_quote import get_tradingview_quote
 from .tradingview_stream import RealTimePool, close_shared_pool, get_shared_pool
 from .yahoo import get_stock_info
@@ -22,9 +22,25 @@ class Quote(TypedDict, total=False):
     last_close: Optional[float]  # yahoo only
 
 
+class TickerInfo(TypedDict, total=False):
+    """Everything known about a ticker: classification metadata + live quote."""
+
+    ticker: Optional[str]  # canonical symbol
+    category: str  # EQUITY | ETF | INDEX | FUTURE | FOREX | CRYPTO | UNKNOWN
+    name: Optional[str]
+    market_cap: Optional[float]
+    sector: Optional[str]
+    industry: Optional[str]
+    company_profile: Optional[dict[str, Any]]
+    alternatives: list[str]
+    quote: Optional[Quote]
+
+
 __all__ = [
     "Quote",
+    "TickerInfo",
     "get_price",
+    "get_ticker",
     "get_shared_classifier",
     "get_stock_info",
     "get_crypto_info",

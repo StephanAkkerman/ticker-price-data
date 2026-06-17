@@ -7,6 +7,9 @@ docs/
 # C extensions
 *.so
 
+# Local caches / databases (e.g. ticker-classifier cache)
+*.db
+
 # Distribution / packaging
 .Python
 build/
