@@ -1,0 +1,35 @@
+"""Unified ticker price data from Yahoo Finance, CoinGecko, and TradingView."""
+
+from typing import Optional, TypedDict
+
+from .coingecko import get_crypto_info
+from .router import get_price, get_shared_classifier
+from .tradingview_quote import get_tradingview_quote
+from .tradingview_stream import RealTimePool, close_shared_pool, get_shared_pool
+from .yahoo import get_stock_info
+
+__version__ = "0.1.0"
+
+
+class Quote(TypedDict, total=False):
+    """Normalized price quote returned by the pricing helpers."""
+
+    price: float
+    change_percent: float
+    volume: float
+    website: str
+    source: str  # "yahoo" | "coingecko" | "tradingview"
+    last_close: Optional[float]  # yahoo only
+
+
+__all__ = [
+    "Quote",
+    "get_price",
+    "get_shared_classifier",
+    "get_stock_info",
+    "get_crypto_info",
+    "get_tradingview_quote",
+    "RealTimePool",
+    "get_shared_pool",
+    "close_shared_pool",
+]

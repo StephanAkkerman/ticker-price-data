@@ -1,68 +1,61 @@
-# Template
+# ticker-price-data
 
-<!-- Add a banner here like: https://github.com/StephanAkkerman/fintwit-bot/blob/main/img/logo/fintwit-banner.png -->
+Unified ticker price data from **Yahoo Finance** (stocks/indices/forex/futures),
+**CoinGecko** (crypto), and **TradingView** (universal fallback).
 
----
-<!-- Adjust the link of the first and second badges to your own repo -->
-<p align="center">
-  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/StephanAkkerman/template/pyversions.yml?label=python%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13&logo=python&style=flat-square">
-  <img src="https://img.shields.io/github/license/StephanAkkerman/template.svg?color=brightgreen" alt="License">
-  <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: black"></a>
-</p>
-
-## Introduction
-
-In this section you can provide a brief introduction to the project. You can also include a brief description of the project and its features.
-
-## Table of Contents 🗂
-
-- [Key Features](#key-features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Citation](#citation)
-- [Contributing](#contributing)
-- [License](#license)
+One normalized quote shape for every asset, with sensible fallbacks and built-in
+caching. Extracted from [fintwit-web](https://github.com/StephanAkkerman/fintwit-web)
+so the pricing logic can be reused across projects.
 
 ## Key Features 🔑
 
-This section is optional. If your project has a lot of features, consider adding a list of key features here.
+- `get_price(ticker, asset_type)` — single entry point; `asset_type="auto"` uses
+  [ticker-classifier](https://github.com/StephanAkkerman/ticker-classifier) to decide
+  stock vs crypto vs forex automatically.
+- `get_stock_info(ticker)` — Yahoo Finance, with a TradingView fallback.
+- `get_crypto_info(ticker)` — CoinGecko via the website `search_v2` endpoint (avoids the
+  public API's free-tier rate limits), with Yahoo → TradingView fallbacks.
+- `get_tradingview_quote(symbol, asset_hint)` — realtime websocket pool + scraper fallback.
+- In-memory caching, stale/negative caching, and concurrency limits built in.
 
-## Installation ⚙️
-<!-- Adjust the link of the second command to your own repo -->
+All helpers return `Optional[dict]`:
 
-The required packages to run this code can be found in the requirements.txt file. To run this file, execute the following code block after cloning the repository:
-
-```bash
-pip install -r requirements.txt
+```python
+{
+    "price": float,
+    "change_percent": float,
+    "volume": float,
+    "website": str,
+    "source": str,            # "yahoo" | "coingecko" | "tradingview"
+    # yahoo also includes "last_close": float | None
+}
 ```
 
-or
+## Installation ⚙️
 
 ```bash
-pip install git+https://github.com/StephanAkkerman/template.git
+pip install git+https://github.com/StephanAkkerman/ticker-price-data.git
+```
+
+or, for local development:
+
+```bash
+pip install -e .
 ```
 
 ## Usage ⌨️
 
-## Citation ✍️
-<!-- Be sure to adjust everything here so it matches your name and repo -->
-If you use this project in your research, please cite as follows:
+```python
+import asyncio
+from ticker_price_data import get_price, get_stock_info, get_crypto_info
 
-```bibtex
-@misc{project_name,
-  author  = {Stephan Akkerman},
-  title   = {Project Name},
-  year    = {2024},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/StephanAkkerman/template}}
-}
+async def main():
+    print(await get_stock_info("AAPL"))     # Yahoo
+    print(await get_crypto_info("BTC"))     # CoinGecko
+    print(await get_price("BTC", "auto"))   # classified automatically
+
+asyncio.run(main())
 ```
-
-## Contributing 🛠
-<!-- Be sure to adjust the repo name here for both the URL and GitHub link -->
-Contributions are welcome! If you have a feature request, bug report, or proposal for code refactoring, please feel free to open an issue on GitHub. We appreciate your help in improving this project.\
-![https://github.com/StephanAkkerman/template/graphs/contributors](https://contributors-img.firebaseapp.com/image?repo=StephanAkkerman/template)
 
 ## License 📜
 
