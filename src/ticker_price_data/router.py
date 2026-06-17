@@ -8,7 +8,7 @@ whether a symbol is a stock, crypto, or forex instrument before routing.
 
 import logging
 import threading
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from .coingecko import get_crypto_info
 from .yahoo import get_stock_info
@@ -54,16 +54,39 @@ async def _best_effort(ticker: str) -> Optional[dict]:
     return await get_crypto_info(ticker)
 
 
-async def _quote_for_classification(classification: dict, ticker: str) -> Optional[dict]:
-    """Route to the right price source based on a classification result."""
-    category = str(classification.get("category") or "").upper()
+async def price_from_classification(classification: Mapping[str, Any]) -> Optional[dict]:
+    """Fetch a quote for an already-classified symbol.
+
+    Routes crypto to CoinGecko and everything else to Yahoo (using
+    ``yahoo_lookup`` when present). Accepts either a ``ticker_classifier`` result
+    (``category``/``ticker``) or a consumer's own classification entry
+    (``kind``/``symbol``), so callers that already classify in batch can delegate
+    just the price routing here instead of duplicating it.
+
+    Returns ``None`` when no symbol can be determined.
+    """
+    category = str(
+        classification.get("category") or classification.get("kind") or ""
+    ).upper()
+    symbol = str(
+        classification.get("ticker") or classification.get("symbol") or ""
+    ).strip()
+    if not symbol:
+        return None
 
     if category in _CRYPTO_CATEGORIES:
-        return await get_crypto_info(classification.get("ticker") or ticker)
+        return await get_crypto_info(symbol)
 
-    if category in _STOCK_CATEGORIES:
-        symbol = classification.get("yahoo_lookup") or classification.get("ticker")
-        return await get_stock_info(symbol or ticker)
+    lookup = classification.get("yahoo_lookup") or symbol
+    return await get_stock_info(lookup)
+
+
+async def _quote_for_classification(classification: dict, ticker: str) -> Optional[dict]:
+    """Route an auto-classified result, falling back to best-effort if unknown."""
+    category = str(classification.get("category") or "").upper()
+
+    if category in _CRYPTO_CATEGORIES or category in _STOCK_CATEGORIES:
+        return await price_from_classification(classification)
 
     return await _best_effort(ticker)
 

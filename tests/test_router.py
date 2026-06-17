@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ticker_price_data.router import get_price, get_ticker
+from ticker_price_data.router import get_price, get_ticker, price_from_classification
 
 STOCK_QUOTE = {"price": 185.0, "source": "yahoo"}
 CRYPTO_QUOTE = {"price": 65000.0, "source": "coingecko"}
@@ -219,3 +219,66 @@ async def test_get_ticker_returns_none_when_unknown_and_no_quote():
 @pytest.mark.asyncio
 async def test_get_ticker_empty_returns_none():
     assert await get_ticker("") is None
+
+
+# ---------------------------------------------------------------------------
+# price_from_classification — price an already-classified entry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_price_from_classification_crypto_uses_crypto_info():
+    with patch(
+        "ticker_price_data.router.get_crypto_info",
+        new=AsyncMock(return_value=CRYPTO_QUOTE),
+    ) as mock_crypto:
+        result = await price_from_classification({"category": "CRYPTO", "ticker": "BTC"})
+
+    mock_crypto.assert_awaited_once_with("BTC")
+    assert result == CRYPTO_QUOTE
+
+
+@pytest.mark.asyncio
+async def test_price_from_classification_uses_yahoo_lookup():
+    with patch(
+        "ticker_price_data.router.get_stock_info",
+        new=AsyncMock(return_value=STOCK_QUOTE),
+    ) as mock_stock:
+        result = await price_from_classification(
+            {"category": "COMMODITY", "ticker": "USOIL", "yahoo_lookup": "CL=F"}
+        )
+
+    mock_stock.assert_awaited_once_with("CL=F")
+    assert result == STOCK_QUOTE
+
+
+@pytest.mark.asyncio
+async def test_price_from_classification_accepts_enricher_entry_shape():
+    # Enricher cache entries use "kind"/"symbol" rather than "category"/"ticker".
+    with patch(
+        "ticker_price_data.router.get_stock_info",
+        new=AsyncMock(return_value=STOCK_QUOTE),
+    ) as mock_stock:
+        result = await price_from_classification(
+            {"kind": "FUTURE", "symbol": "NQ", "yahoo_lookup": "NQ=F"}
+        )
+
+    mock_stock.assert_awaited_once_with("NQ=F")
+    assert result == STOCK_QUOTE
+
+
+@pytest.mark.asyncio
+async def test_price_from_classification_crypto_enricher_shape():
+    with patch(
+        "ticker_price_data.router.get_crypto_info",
+        new=AsyncMock(return_value=CRYPTO_QUOTE),
+    ) as mock_crypto:
+        result = await price_from_classification({"kind": "CRYPTO", "symbol": "ETH"})
+
+    mock_crypto.assert_awaited_once_with("ETH")
+    assert result == CRYPTO_QUOTE
+
+
+@pytest.mark.asyncio
+async def test_price_from_classification_empty_symbol_returns_none():
+    assert await price_from_classification({"category": "EQUITY"}) is None

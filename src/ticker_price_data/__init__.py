@@ -3,7 +3,12 @@
 from typing import Any, Optional, TypedDict
 
 from .coingecko import get_crypto_info
-from .router import get_price, get_shared_classifier, get_ticker
+from .router import (
+    get_price,
+    get_shared_classifier,
+    get_ticker,
+    price_from_classification,
+)
 from .tradingview_quote import get_tradingview_quote
 from .tradingview_stream import RealTimePool, close_shared_pool, get_shared_pool
 from .yahoo import get_stock_info
@@ -41,6 +46,7 @@ __all__ = [
     "TickerInfo",
     "get_price",
     "get_ticker",
+    "price_from_classification",
     "get_shared_classifier",
     "get_stock_info",
     "get_crypto_info",
