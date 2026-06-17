@@ -1,3 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ticker-price-data"
+version = "0.1.0"
+description = "Unified ticker price data from Yahoo Finance, CoinGecko, and TradingView."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Stephan Akkerman" }]
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp",
+    "tradingview-scraper>=0.4.20",
+    "ticker-classifier @ git+https://github.com/StephanAkkerman/ticker-classifier.git",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[project.urls]
+Homepage = "https://github.com/StephanAkkerman/ticker-price-data"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ticker_price_data"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
 [tool.isort]
 multi_line_output = 3
 include_trailing_comma = true
@@ -7,8 +41,6 @@ profile = "black"
 
 [tool.ruff]
 line-length = 88
-#select = ["I001"]
 
 [tool.ruff.lint.pydocstyle]
-# Use Google-style docstrings.
 convention = "numpy"

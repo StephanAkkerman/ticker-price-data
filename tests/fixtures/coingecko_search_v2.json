@@ -1,0 +1,27 @@
+{
+  "coins": [
+    {
+      "id": "bitcoin",
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "market_cap_rank": 1,
+      "data": {
+        "price": "$65,993.78",
+        "price_change_percentage_24h": { "usd": 0.16155310769260334 },
+        "total_volume": "$26,245,075,399",
+        "market_cap": "$1,322,843,931,745"
+      }
+    },
+    {
+      "id": "wrapped-bitcoin",
+      "name": "Wrapped Bitcoin",
+      "symbol": "WBTC",
+      "market_cap_rank": 15,
+      "data": {
+        "price": "$65,900.00",
+        "price_change_percentage_24h": { "usd": 0.1 },
+        "total_volume": "$200,000,000"
+      }
+    }
+  ]
+}
