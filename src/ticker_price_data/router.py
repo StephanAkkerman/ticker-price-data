@@ -88,13 +88,16 @@ async def _quote_for_classification(classification: dict, ticker: str) -> Option
     if category in _CRYPTO_CATEGORIES or category in _STOCK_CATEGORIES:
         return await price_from_classification(classification)
 
-    return await _best_effort(ticker)
+    return await _best_effort(classification.get("ticker") or ticker)
 
 
-def _build_ticker_info(classification: dict, quote: Optional[dict]) -> dict:
+def _build_ticker_info(
+    classification: dict, quote: Optional[dict], ticker: Optional[str] = None
+) -> dict:
     """Project a classifier result onto the package's own ``TickerInfo`` shape."""
+    resolved_ticker = classification.get("ticker") or ticker or ""
     return {
-        "ticker": str(classification.get("ticker") or "").upper() or None,
+        "ticker": str(resolved_ticker).upper() or None,
         "category": str(classification.get("category") or "").upper() or "UNKNOWN",
         "name": classification.get("name"),
         "market_cap": classification.get("market_cap"),
@@ -182,4 +185,4 @@ async def get_ticker(ticker: str, *, classifier=None) -> Optional[dict]:
         return _build_ticker_info({"ticker": ticker, "category": "UNKNOWN"}, quote)
 
     quote = await _quote_for_classification(classification, ticker)
-    return _build_ticker_info(classification, quote)
+    return _build_ticker_info(classification, quote, ticker=ticker)
