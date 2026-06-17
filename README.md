@@ -37,7 +37,7 @@ All helpers return `Optional[dict]`:
 ## Installation ⚙️
 
 ```bash
-pip install git+https://github.com/StephanAkkerman/ticker-price-data.git
+pip install ticker-price-data
 ```
 
 or, for local development:
