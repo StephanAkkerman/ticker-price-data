@@ -4,8 +4,7 @@ Unified ticker price data from **Yahoo Finance** (stocks/indices/forex/futures),
 **CoinGecko** (crypto), and **TradingView** (universal fallback).
 
 One normalized quote shape for every asset, with sensible fallbacks and built-in
-caching. Extracted from [fintwit-web](https://github.com/StephanAkkerman/fintwit-web)
-so the pricing logic can be reused across projects.
+caching.
 
 ## Key Features 🔑
 
