@@ -8,7 +8,7 @@ whether a symbol is a stock, crypto, or forex instrument before routing.
 
 import logging
 import threading
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from .coingecko import get_crypto_info
 from .yahoo import get_stock_info
@@ -54,6 +54,61 @@ async def _best_effort(ticker: str) -> Optional[dict]:
     return await get_crypto_info(ticker)
 
 
+async def price_from_classification(classification: Mapping[str, Any]) -> Optional[dict]:
+    """Fetch a quote for an already-classified symbol.
+
+    Routes crypto to CoinGecko and everything else to Yahoo (using
+    ``yahoo_lookup`` when present). Accepts either a ``ticker_classifier`` result
+    (``category``/``ticker``) or a consumer's own classification entry
+    (``kind``/``symbol``), so callers that already classify in batch can delegate
+    just the price routing here instead of duplicating it.
+
+    Returns ``None`` when no symbol can be determined.
+    """
+    category = str(
+        classification.get("category") or classification.get("kind") or ""
+    ).upper()
+    symbol = str(
+        classification.get("ticker") or classification.get("symbol") or ""
+    ).strip()
+    if not symbol:
+        return None
+
+    if category in _CRYPTO_CATEGORIES:
+        return await get_crypto_info(symbol)
+
+    lookup = classification.get("yahoo_lookup") or symbol
+    return await get_stock_info(lookup)
+
+
+async def _quote_for_classification(classification: dict, ticker: str) -> Optional[dict]:
+    """Route an auto-classified result, falling back to best-effort if unknown."""
+    category = str(classification.get("category") or "").upper()
+
+    if category in _CRYPTO_CATEGORIES or category in _STOCK_CATEGORIES:
+        return await price_from_classification(classification)
+
+    return await _best_effort(classification.get("ticker") or ticker)
+
+
+def _build_ticker_info(
+    classification: dict, quote: Optional[dict], ticker: Optional[str] = None
+) -> dict:
+    """Project a classifier result onto the package's own ``TickerInfo`` shape."""
+    resolved_ticker = classification.get("ticker") or ticker or ""
+    return {
+        "ticker": str(resolved_ticker).upper() or None,
+        "category": str(classification.get("category") or "").upper() or "UNKNOWN",
+        "name": classification.get("name"),
+        "market_cap": classification.get("market_cap"),
+        "sector": classification.get("sector"),
+        "industry": classification.get("industry"),
+        "company_profile": classification.get("company_profile"),
+        "alternatives": classification.get("alternatives") or [],
+        "quote": quote,
+    }
+
+
 async def get_price(
     ticker: str, asset_type: str = "stock", *, classifier=None
 ) -> Optional[dict]:
@@ -93,14 +148,41 @@ async def get_price(
     if not classification:
         return await _best_effort(ticker)
 
-    category = str(classification.get("category") or "").upper()
+    return await _quote_for_classification(classification, ticker)
 
-    if category in _CRYPTO_CATEGORIES:
-        symbol = classification.get("ticker") or ticker
-        return await get_crypto_info(symbol)
 
-    if category in _STOCK_CATEGORIES:
-        symbol = classification.get("yahoo_lookup") or classification.get("ticker")
-        return await get_stock_info(symbol or ticker)
+async def get_ticker(ticker: str, *, classifier=None) -> Optional[dict]:
+    """Fetch everything known about ``ticker``: classification metadata + quote.
 
-    return await _best_effort(ticker)
+    Classifies the symbol once (via ``ticker_classifier``), routes to the
+    appropriate price source, and merges the result into a single ``TickerInfo``
+    dict containing identity/metadata (sector, industry, market cap, company
+    profile, ...) alongside the live ``quote``.
+
+    Parameters
+    ----------
+    ticker : str
+        The symbol to look up.
+    classifier : optional
+        A ``TickerClassifier``-like instance. Defaults to a shared process-wide
+        instance. Primarily for testing.
+
+    Returns
+    -------
+    dict | None
+        A ``TickerInfo`` dict, or ``None`` when neither classification nor a
+        quote could be resolved.
+    """
+    ticker = (ticker or "").strip()
+    if not ticker:
+        return None
+
+    classification = await _classify(ticker, classifier)
+    if not classification:
+        quote = await _best_effort(ticker)
+        if quote is None:
+            return None
+        return _build_ticker_info({"ticker": ticker, "category": "UNKNOWN"}, quote)
+
+    quote = await _quote_for_classification(classification, ticker)
+    return _build_ticker_info(classification, quote, ticker=ticker)

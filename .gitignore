@@ -2,9 +2,13 @@
 __pycache__/
 *.py[cod]
 *$py.class
+docs/
 
 # C extensions
 *.so
+
+# Local caches / databases (e.g. ticker-classifier cache)
+*.db
 
 # Distribution / packaging
 .Python
