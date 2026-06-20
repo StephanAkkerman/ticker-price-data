@@ -24,7 +24,12 @@ class Quote(TypedDict, total=False):
     volume: float
     website: str
     source: str  # "yahoo" | "coingecko" | "tradingview"
-    last_close: Optional[float]  # yahoo only
+    last_close: Optional[float]  # previous day's close; yahoo only
+    session: str  # "regular" | "pre-market" | "after-hours" | "closed"; yahoo only
+    extended_price: Optional[float]  # after-hours or pre-market price; yahoo only
+    extended_change_percent: Optional[
+        float
+    ]  # (extended_price − price) / price × 100; yahoo only
 
 
 class TickerInfo(TypedDict, total=False):
