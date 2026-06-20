@@ -158,3 +158,134 @@ async def test_get_stock_info_uses_tradingview_fallback_when_yahoo_unavailable()
         result = await get_stock_info("AAPL")
 
     assert result == tv_fallback
+
+
+@pytest.mark.asyncio
+async def test_session_field_present_during_regular_hours():
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(200, YAHOO_RESPONSE)),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_us_stock_session",
+            return_value="regular",
+        ),
+    ):
+        result = await get_stock_info("AAPL")
+
+    assert result is not None
+    assert result["session"] == "regular"
+    assert "extended_price" not in result
+    assert "extended_change_percent" not in result
+
+
+@pytest.mark.asyncio
+async def test_after_hours_with_post_market_price():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "meta": {
+                        "regularMarketPrice": 185.0,
+                        "previousClose": 182.0,
+                        "regularMarketVolume": 50_000_000,
+                        "postMarketPrice": 186.5,
+                    }
+                }
+            ]
+        }
+    }
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(200, data)),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_us_stock_session",
+            return_value="after-hours",
+        ),
+    ):
+        result = await get_stock_info("AAPL")
+
+    assert result is not None
+    assert result["session"] == "after-hours"
+    assert result["extended_price"] == 186.5
+    expected_change = (186.5 - 185.0) / 185.0 * 100
+    assert abs(result["extended_change_percent"] - expected_change) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_after_hours_without_post_market_price():
+    # Yahoo has no postMarketPrice yet (no after-hours trades)
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(200, YAHOO_RESPONSE)),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_us_stock_session",
+            return_value="after-hours",
+        ),
+    ):
+        result = await get_stock_info("AAPL")
+
+    assert result is not None
+    assert result["session"] == "after-hours"
+    assert "extended_price" not in result
+    assert "extended_change_percent" not in result
+
+
+@pytest.mark.asyncio
+async def test_pre_market_with_pre_market_price():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "meta": {
+                        "regularMarketPrice": 185.0,
+                        "previousClose": 182.0,
+                        "regularMarketVolume": 50_000_000,
+                        "preMarketPrice": 184.0,
+                    }
+                }
+            ]
+        }
+    }
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(200, data)),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_us_stock_session",
+            return_value="pre-market",
+        ),
+    ):
+        result = await get_stock_info("AAPL")
+
+    assert result is not None
+    assert result["session"] == "pre-market"
+    assert result["extended_price"] == 184.0
+    expected_change = (184.0 - 185.0) / 185.0 * 100
+    assert abs(result["extended_change_percent"] - expected_change) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_pre_market_without_pre_market_price():
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(200, YAHOO_RESPONSE)),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_us_stock_session",
+            return_value="pre-market",
+        ),
+    ):
+        result = await get_stock_info("AAPL")
+
+    assert result is not None
+    assert result["session"] == "pre-market"
+    assert "extended_price" not in result
+    assert "extended_change_percent" not in result

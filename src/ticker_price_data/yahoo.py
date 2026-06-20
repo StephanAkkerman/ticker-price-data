@@ -5,6 +5,7 @@ from typing import Optional
 
 import aiohttp
 
+from .market_session import get_us_stock_session
 from .tradingview_quote import get_tradingview_quote
 
 logger = logging.getLogger(__name__)
@@ -131,14 +132,27 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
 
     volume = meta.get("regularMarketVolume", 0) * current_price if current_price else 0
 
-    return {
+    market_session = get_us_stock_session()
+    payload: dict = {
         "price": current_price,
         "last_close": prev_close,
         "change_percent": change,
         "volume": volume,
         "website": f"https://finance.yahoo.com/quote/{lookup_symbol}",
         "source": "yahoo",
+        "session": market_session,
     }
+
+    if market_session in ("pre-market", "after-hours"):
+        ext_key = "preMarketPrice" if market_session == "pre-market" else "postMarketPrice"
+        ext_price = meta.get(ext_key)
+        if ext_price is not None and current_price and current_price != 0:
+            payload["extended_price"] = ext_price
+            payload["extended_change_percent"] = (
+                (ext_price - current_price) / current_price * 100
+            )
+
+    return payload
 
 
 async def get_stock_info(ticker: str) -> Optional[dict]:
