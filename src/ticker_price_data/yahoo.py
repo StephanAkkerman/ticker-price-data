@@ -132,7 +132,6 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
 
     volume = meta.get("regularMarketVolume", 0) * current_price if current_price else 0
 
-    market_session = get_us_stock_session()
     payload: dict = {
         "price": current_price,
         "last_close": prev_close,
@@ -140,19 +139,34 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
         "volume": volume,
         "website": f"https://finance.yahoo.com/quote/{lookup_symbol}",
         "source": "yahoo",
-        "session": market_session,
+        "_pre_market_price": meta.get("preMarketPrice"),
+        "_post_market_price": meta.get("postMarketPrice"),
     }
 
-    if market_session in ("pre-market", "after-hours"):
-        ext_key = "preMarketPrice" if market_session == "pre-market" else "postMarketPrice"
-        ext_price = meta.get(ext_key)
-        if ext_price is not None and current_price and current_price != 0:
-            payload["extended_price"] = ext_price
-            payload["extended_change_percent"] = (
-                (ext_price - current_price) / current_price * 100
-            )
-
     return payload
+
+
+def _inject_session(payload: dict) -> dict:
+    """Return a copy of payload with current session and extended-hours fields added.
+
+    Strips the private _pre_market_price/_post_market_price keys and injects
+    session, extended_price, extended_change_percent based on the current time.
+    """
+    result = dict(payload)
+    pre = result.pop("_pre_market_price", None)
+    post = result.pop("_post_market_price", None)
+
+    session = get_us_stock_session()
+    result["session"] = session
+
+    price = result.get("price")
+    if session in ("pre-market", "after-hours") and price and price != 0:
+        ext_price = pre if session == "pre-market" else post
+        if ext_price is not None:
+            result["extended_price"] = ext_price
+            result["extended_change_percent"] = (ext_price - price) / price * 100
+
+    return result
 
 
 async def get_stock_info(ticker: str) -> Optional[dict]:
@@ -162,13 +176,13 @@ async def get_stock_info(ticker: str) -> Optional[dict]:
 
     found, cached = await _get_cached(symbol, allow_stale=False)
     if found:
-        return cached
+        return _inject_session(cached)
 
     async with _REQUEST_SEMAPHORE:
         # Re-check cache while waiting in the queue.
         found, cached = await _get_cached(symbol, allow_stale=False)
         if found:
-            return cached
+            return _inject_session(cached)
 
         try:
             for lookup_symbol in _lookup_candidates(symbol):
@@ -179,14 +193,14 @@ async def get_stock_info(ticker: str) -> Optional[dict]:
                 await _set_cached(symbol, payload)
                 if lookup_symbol != symbol:
                     await _set_cached(lookup_symbol, payload)
-                return payload
+                return _inject_session(payload)
         except Exception as exc:
             logger.debug("[yahoo] %s fetch failed: %r", symbol, exc)
 
         found, stale = await _get_cached(symbol, allow_stale=True)
         if found:
             logger.info("[yahoo] serving stale cache for %s", symbol)
-            return stale
+            return _inject_session(stale)
 
         tradingview_payload = await get_tradingview_quote(symbol, asset_hint="stock")
         if tradingview_payload is not None:
