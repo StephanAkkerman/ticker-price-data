@@ -190,8 +190,8 @@ async def test_after_hours_with_post_market_price():
                         "regularMarketPrice": 185.0,
                         "previousClose": 182.0,
                         "regularMarketVolume": 50_000_000,
-                        "postMarketPrice": 186.5,
-                    }
+                    },
+                    "indicators": {"quote": [{"close": [184.0, 184.5, 186.5]}]},
                 }
             ]
         }
@@ -216,12 +216,26 @@ async def test_after_hours_with_post_market_price():
 
 
 @pytest.mark.asyncio
-async def test_after_hours_without_post_market_price():
-    # Yahoo has no postMarketPrice yet (no after-hours trades)
+async def test_after_hours_no_extended_price_when_candle_matches_regular():
+    # After-hours session but no extended-hours trades — last candle == regularMarketPrice
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "meta": {
+                        "regularMarketPrice": 185.0,
+                        "previousClose": 182.0,
+                        "regularMarketVolume": 50_000_000,
+                    },
+                    "indicators": {"quote": [{"close": [184.0, 185.0, 185.0]}]},
+                }
+            ]
+        }
+    }
     with (
         patch(
             "ticker_price_data.yahoo.aiohttp.ClientSession",
-            mock_session(mock_response(200, YAHOO_RESPONSE)),
+            mock_session(mock_response(200, data)),
         ),
         patch(
             "ticker_price_data.yahoo.get_us_stock_session",
@@ -246,8 +260,8 @@ async def test_pre_market_with_pre_market_price():
                         "regularMarketPrice": 185.0,
                         "previousClose": 182.0,
                         "regularMarketVolume": 50_000_000,
-                        "preMarketPrice": 184.0,
-                    }
+                    },
+                    "indicators": {"quote": [{"close": [183.0, 183.5, 184.0]}]},
                 }
             ]
         }
@@ -272,11 +286,25 @@ async def test_pre_market_with_pre_market_price():
 
 
 @pytest.mark.asyncio
-async def test_pre_market_without_pre_market_price():
+async def test_pre_market_no_extended_price_when_candle_matches_regular():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "meta": {
+                        "regularMarketPrice": 185.0,
+                        "previousClose": 182.0,
+                        "regularMarketVolume": 50_000_000,
+                    },
+                    "indicators": {"quote": [{"close": [185.0, 185.0, 185.0]}]},
+                }
+            ]
+        }
+    }
     with (
         patch(
             "ticker_price_data.yahoo.aiohttp.ClientSession",
-            mock_session(mock_response(200, YAHOO_RESPONSE)),
+            mock_session(mock_response(200, data)),
         ),
         patch(
             "ticker_price_data.yahoo.get_us_stock_session",
@@ -289,3 +317,39 @@ async def test_pre_market_without_pre_market_price():
     assert result["session"] == "pre-market"
     assert "extended_price" not in result
     assert "extended_change_percent" not in result
+
+
+@pytest.mark.asyncio
+async def test_closed_session_shows_extended_price_from_candles():
+    # Simulates weekend: session="closed" but last candle carries Friday's after-hours price
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "meta": {
+                        "regularMarketPrice": 185.0,
+                        "previousClose": 182.0,
+                        "regularMarketVolume": 50_000_000,
+                    },
+                    "indicators": {"quote": [{"close": [184.0, 185.5, 186.2]}]},
+                }
+            ]
+        }
+    }
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(200, data)),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_us_stock_session",
+            return_value="closed",
+        ),
+    ):
+        result = await get_stock_info("MU")
+
+    assert result is not None
+    assert result["session"] == "closed"
+    assert result["extended_price"] == 186.2
+    expected_change = (186.2 - 185.0) / 185.0 * 100
+    assert abs(result["extended_change_percent"] - expected_change) < 0.001

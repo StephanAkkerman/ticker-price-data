@@ -95,7 +95,7 @@ def _reset_cache_for_tests() -> None:
 
 
 async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{lookup_symbol}"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{lookup_symbol}?range=1d&interval=1m&includePrePost=true"
     timeout = aiohttp.ClientTimeout(total=8)
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -115,12 +115,14 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
     meta = chart.get("meta", {})
     quote = chart.get("indicators", {}).get("quote", [{}])[0]
 
-    current_price = _last_non_null(quote.get("close"))
+    current_price = meta.get("regularMarketPrice")
     if current_price is None:
-        current_price = meta.get("regularMarketPrice")
+        current_price = _last_non_null(quote.get("close"))
 
     if current_price is None:
         return None
+
+    ext_price_raw = _last_non_null(quote.get("close"))
 
     prev_close = meta.get("previousClose")
     if prev_close is None:
@@ -139,8 +141,7 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
         "volume": volume,
         "website": f"https://finance.yahoo.com/quote/{lookup_symbol}",
         "source": "yahoo",
-        "_pre_market_price": meta.get("preMarketPrice"),
-        "_post_market_price": meta.get("postMarketPrice"),
+        "_ext_price": ext_price_raw,
     }
 
     return payload
@@ -149,22 +150,28 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
 def _inject_session(payload: dict) -> dict:
     """Return a copy of payload with current session and extended-hours fields added.
 
-    Strips the private _pre_market_price/_post_market_price keys and injects
-    session, extended_price, extended_change_percent based on the current time.
+    Strips the private _ext_price key and injects session, extended_price,
+    extended_change_percent based on the current time. Extended fields are shown
+    whenever session is not "regular" and the extended price differs from the
+    regular close — this keeps after-hours data visible through weekends/holidays
+    until pre-market begins.
     """
     result = dict(payload)
-    pre = result.pop("_pre_market_price", None)
-    post = result.pop("_post_market_price", None)
+    ext_price = result.pop("_ext_price", None)
 
     session = get_us_stock_session()
     result["session"] = session
 
     price = result.get("price")
-    if session in ("pre-market", "after-hours") and price and price != 0:
-        ext_price = pre if session == "pre-market" else post
-        if ext_price is not None:
-            result["extended_price"] = ext_price
-            result["extended_change_percent"] = (ext_price - price) / price * 100
+    if (
+        session != "regular"
+        and ext_price is not None
+        and price
+        and price != 0
+        and ext_price != price
+    ):
+        result["extended_price"] = ext_price
+        result["extended_change_percent"] = (ext_price - price) / price * 100
 
     return result
 
