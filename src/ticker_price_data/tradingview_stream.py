@@ -17,7 +17,9 @@ final result.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -25,6 +27,9 @@ from queue import Empty, Queue
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+_HEARTBEAT_RE = re.compile(r"^~h~\d+$")
+_MESSAGE_SPLIT_RE = re.compile(r"~m~\d+~m~")
 
 try:
     from tradingview_scraper.symbols.stream import RealTimeData
@@ -203,8 +208,40 @@ class RealTimePool:
         result = self._build_quote(request, payload)
         self._finish_request(request, result=result)
 
+    def _handle_raw_message(self, raw_message: Any) -> None:
+        if not isinstance(raw_message, str):
+            return
+
+        if _HEARTBEAT_RE.fullmatch(raw_message):
+            try:
+                self._rtd.ws.send(raw_message)
+            except Exception as exc:
+                logger.debug("[tradingview] heartbeat ack failed: %r", exc)
+            return
+
+        for item in (part for part in _MESSAGE_SPLIT_RE.split(raw_message) if part):
+            if _HEARTBEAT_RE.fullmatch(item):
+                try:
+                    self._rtd.ws.send(item)
+                except Exception as exc:
+                    logger.debug("[tradingview] heartbeat ack failed: %r", exc)
+                continue
+
+            if not item.lstrip().startswith(("{", "[")):
+                logger.debug("[tradingview] skipping non-JSON frame: %r", item)
+                continue
+
+            try:
+                packet = json.loads(item)
+            except json.JSONDecodeError as exc:
+                logger.debug(
+                    "[tradingview] malformed JSON frame skipped: %r (%s)", item, exc
+                )
+                continue
+
+            self._handle_packet(packet)
+
     def _run(self) -> None:
-        data_iter = self._rtd.get_data()
         while self._running:
             try:
                 cmd, request = self._commands.get(timeout=0.05)
@@ -226,15 +263,18 @@ class RealTimePool:
                     self._finish_request(request, error=exc)
 
             try:
-                packet = next(data_iter)
-            except StopIteration:
-                break
+                raw_message = self._rtd.ws.recv()
             except Exception as exc:
                 logger.debug("[tradingview] recv error: %r", exc)
                 time.sleep(0.1)
                 continue
 
-            self._handle_packet(packet)
+            try:
+                self._handle_raw_message(raw_message)
+            except Exception as exc:
+                logger.debug("[tradingview] message handling error: %r", exc)
+                time.sleep(0.1)
+                continue
 
         try:
             self._rtd.ws.close()
