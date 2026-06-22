@@ -19,6 +19,7 @@ caching.
   public API's free-tier rate limits), with Yahoo → TradingView fallbacks.
 - `get_tradingview_quote(symbol, asset_hint)` — realtime websocket pool + scraper fallback.
 - In-memory caching, stale/negative caching, and concurrency limits built in.
+- Pre-market and after-hours data where available.
 
 All helpers return `Optional[dict]`:
 
