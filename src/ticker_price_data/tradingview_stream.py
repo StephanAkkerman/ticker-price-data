@@ -27,7 +27,11 @@ from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Optional
 
-from websocket import create_connection
+from websocket import (
+    WebSocketConnectionClosedException,
+    WebSocketTimeoutException,
+    create_connection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,7 @@ _HEARTBEAT_RE = re.compile(r"^~h~\d+$")
 _MESSAGE_SPLIT_RE = re.compile(r"~m~\d+~m~")
 
 _TV_WS_URL = "wss://data.tradingview.com/socket.io/websocket?from=screener%2F"
+_CONNECT_RETRY_DELAY_SECONDS = 1.0
 _TV_REQUEST_HEADERS = {
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "en-US,en;q=0.9,fa;q=0.8",
@@ -218,7 +223,7 @@ class RealTimePool:
     """Single TradingView websocket connection shared across quote requests."""
 
     def __init__(self) -> None:
-        self._socket = _TradingViewSocket()
+        self._socket: _TradingViewSocket | None = None
         self._commands: Queue[tuple[str, _QuoteRequest | None]] = Queue()
         self._pending: dict[str, _QuoteRequest] = {}
         self._lock = threading.Lock()
@@ -226,9 +231,52 @@ class RealTimePool:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def _connect_socket(self) -> bool:
+        if self._socket is not None:
+            return True
+
+        try:
+            self._socket = _TradingViewSocket()
+            return True
+        except Exception as exc:
+            logger.warning("[tradingview] socket connect failed: %r", exc)
+            self._socket = None
+            return False
+
+    def _close_socket(self) -> None:
+        socket = self._socket
+        self._socket = None
+        if socket is None:
+            return
+
+        try:
+            socket.close()
+        except Exception:
+            pass
+
+    def _fail_pending_requests(self, error: Exception) -> None:
+        with self._lock:
+            pending_requests = list(self._pending.values())
+            self._pending.clear()
+
+        for request in pending_requests:
+            self._finish_request(request, error=error)
+
+    def _handle_socket_failure(self, exc: Exception) -> None:
+        if not self._running:
+            return
+
+        logger.warning("[tradingview] connection lost, reconnecting: %r", exc)
+        self._close_socket()
+        self._fail_pending_requests(ConnectionError(str(exc)))
+
     def _send_request_setup(self, request: _QuoteRequest) -> None:
-        self._socket._initialize_sessions(request.quote_session, request.chart_session)
-        self._socket._add_symbol_to_sessions(
+        socket = self._socket
+        if socket is None:
+            raise RuntimeError("TradingView socket is not connected")
+
+        socket._initialize_sessions(request.quote_session, request.chart_session)
+        socket._add_symbol_to_sessions(
             request.quote_session,
             request.chart_session,
             request.symbol,
@@ -323,7 +371,9 @@ class RealTimePool:
 
         if _HEARTBEAT_RE.fullmatch(raw_message):
             try:
-                self._socket.send_raw(raw_message)
+                socket = self._socket
+                if socket is not None:
+                    socket.send_raw(raw_message)
             except Exception as exc:
                 logger.debug("[tradingview] heartbeat ack failed: %r", exc)
             return
@@ -331,7 +381,9 @@ class RealTimePool:
         for item in (part for part in _MESSAGE_SPLIT_RE.split(raw_message) if part):
             if _HEARTBEAT_RE.fullmatch(item):
                 try:
-                    self._socket.send_raw(item)
+                    socket = self._socket
+                    if socket is not None:
+                        socket.send_raw(item)
                 except Exception as exc:
                     logger.debug("[tradingview] heartbeat ack failed: %r", exc)
                 continue
@@ -352,6 +404,11 @@ class RealTimePool:
 
     def _run(self) -> None:
         while self._running:
+            if self._socket is None:
+                if not self._connect_socket():
+                    time.sleep(_CONNECT_RETRY_DELAY_SECONDS)
+                    continue
+
             try:
                 cmd, request = self._commands.get(timeout=0.05)
             except Empty:
@@ -372,12 +429,21 @@ class RealTimePool:
                     self._finish_request(request, error=exc)
 
             try:
-                raw_message = self._socket.ws.recv()
+                socket = self._socket
+                if socket is None:
+                    continue
+                raw_message = socket.ws.recv()
+            except WebSocketTimeoutException:
+                continue
+            except WebSocketConnectionClosedException as exc:
+                self._handle_socket_failure(exc)
+                time.sleep(_CONNECT_RETRY_DELAY_SECONDS)
+                continue
             except Exception as exc:
                 if not self._running:
                     break
-                logger.debug("[tradingview] recv error: %r", exc)
-                time.sleep(0.1)
+                self._handle_socket_failure(exc)
+                time.sleep(_CONNECT_RETRY_DELAY_SECONDS)
                 continue
 
             try:
@@ -388,14 +454,14 @@ class RealTimePool:
                 continue
 
         try:
-            self._socket.close()
+            self._close_socket()
         except Exception:
             pass
 
     def _request_session_ids(self) -> tuple[str, str]:
-        return self._socket.generate_session("qs_"), self._socket.generate_session(
-            "cs_"
-        )
+        return _TradingViewSocket.generate_session(
+            "qs_"
+        ), _TradingViewSocket.generate_session("cs_")
 
     def get_quote_sync(
         self, symbol: str, asset_hint: str | None = None, timeout: float = 6.0
