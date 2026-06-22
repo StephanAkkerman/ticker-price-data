@@ -30,7 +30,7 @@ All helpers return `Optional[dict]`:
     "volume": float,
     "website": str,
     "source": str,                      # "yahoo" | "coingecko" | "tradingview"
-    # yahoo only:
+    # stocks only:
     "last_close": float | None,         # previous day's regular-session close
     "session": str,                     # "regular" | "pre-market" | "after-hours" | "closed"
     "extended_price": float,            # pre/after-hours price (omitted when session == "regular")
