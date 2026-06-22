@@ -155,13 +155,23 @@ def _fetch_symbol_market_row_sync(
     return _pick_best_row(rows, asset_hint, requested_symbol_full)
 
 
+_TV_SESSION_MAP: dict[str, str] = {
+    "pre_market": "pre-market",
+    "market": "regular",
+    "post_market": "after-hours",
+    "out_of_session": "closed",
+}
+
+
 async def get_tradingview_quote(
     symbol: str, asset_hint: str | None = None, prefer_realtime: bool = True
 ) -> Optional[dict]:
     """Best-effort TradingView quote fallback.
 
     Returns data in the same shape as yahoo/coingecko quote helpers:
-    ``{price, change_percent, volume, website}``.
+    ``{price, change_percent, volume, website}``. When the websocket pool is
+    used, also includes ``session``, and ``extended_price`` /
+    ``extended_change_percent`` when pre/after-hours data is available.
     """
 
     normalized = _normalize_symbol(symbol)
@@ -200,7 +210,11 @@ async def get_tradingview_quote(
         if isinstance(realtime, dict) and _to_float(realtime.get("price")) is not None:
             price = _to_float(realtime.get("price"))
             if price is not None:
-                return {
+                raw = realtime.get("raw") or {}
+                tv_session = str(raw.get("current_session") or "")
+                session = _TV_SESSION_MAP.get(tv_session, "closed")
+
+                quote: dict = {
                     "price": price,
                     "change_percent": _to_float(realtime.get("change_percent")) or 0.0,
                     "volume": _to_float(realtime.get("volume")) or 0.0,
@@ -209,7 +223,22 @@ async def get_tradingview_quote(
                         or f"https://www.tradingview.com/symbols/{normalized.replace(':', '-')}/"
                     ),
                     "source": "tradingview",
+                    "session": session,
                 }
+
+                rtc_price = _to_float(raw.get("rtc"))
+                rchp = _to_float(raw.get("rchp"))
+                if (
+                    session != "regular"
+                    and rtc_price is not None
+                    and rtc_price != price
+                ):
+                    quote["extended_price"] = rtc_price
+                    quote["extended_change_percent"] = (
+                        rchp if rchp is not None else (rtc_price - price) / price * 100
+                    )
+
+                return quote
 
     row = await asyncio.to_thread(
         _fetch_symbol_market_row_sync, normalized, asset_hint, requested_symbol_full
