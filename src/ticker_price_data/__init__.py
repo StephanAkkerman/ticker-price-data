@@ -13,7 +13,7 @@ from .tradingview_quote import get_tradingview_quote
 from .tradingview_stream import RealTimePool, close_shared_pool, get_shared_pool
 from .yahoo import get_stock_info
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 
 class Quote(TypedDict, total=False):

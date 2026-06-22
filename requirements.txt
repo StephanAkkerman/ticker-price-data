@@ -1,3 +1,4 @@
 aiohttp
+websocket-client>=1.9.0
 tradingview-scraper>=0.4.20
 ticker-classifier==0.1.4

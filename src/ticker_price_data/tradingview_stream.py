@@ -1,8 +1,7 @@
 """TradingView websocket pool for quote lookups.
 
-`RealTimeData` opens a websocket per instance. This module keeps one instance
-alive and multiplexes symbol lookups over it so callers do not open a socket
-per symbol.
+This module keeps one websocket connection alive and multiplexes symbol
+lookups over it so callers do not open a socket per symbol.
 
 The pool is optimized for snapshot-style quote fetches:
 - create one websocket connection per process
@@ -19,22 +18,135 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
+import string
 import threading
 import time
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Optional
 
+from websocket import create_connection
+
 logger = logging.getLogger(__name__)
 
 _HEARTBEAT_RE = re.compile(r"^~h~\d+$")
 _MESSAGE_SPLIT_RE = re.compile(r"~m~\d+~m~")
 
-try:
-    from tradingview_scraper.symbols.stream import RealTimeData
-except Exception:  # pragma: no cover - optional dependency
-    RealTimeData = None  # type: ignore
+_TV_WS_URL = "wss://data.tradingview.com/socket.io/websocket?from=screener%2F"
+_TV_REQUEST_HEADERS = {
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Language": "en-US,en;q=0.9,fa;q=0.8",
+    "Cache-Control": "no-cache",
+    "Connection": "Upgrade",
+    "Host": "data.tradingview.com",
+    "Origin": "https://www.tradingview.com",
+    "Pragma": "no-cache",
+    "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+    "Upgrade": "websocket",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+    ),
+}
+
+
+class _TradingViewSocket:
+    def __init__(self) -> None:
+        self.ws = create_connection(
+            _TV_WS_URL, headers=_TV_REQUEST_HEADERS, timeout=1.0
+        )
+
+    @staticmethod
+    def generate_session(prefix: str) -> str:
+        random_string = "".join(
+            random.choice(string.ascii_lowercase) for _ in range(12)
+        )
+        return prefix + random_string
+
+    @staticmethod
+    def _prepend_header(message: str) -> str:
+        return f"~m~{len(message)}~m~{message}"
+
+    @staticmethod
+    def _construct_message(func: str, param_list: list) -> str:
+        return json.dumps({"m": func, "p": param_list}, separators=(",", ":"))
+
+    def send_message(self, func: str, args: list) -> None:
+        message = self._prepend_header(self._construct_message(func, args))
+        self.ws.send(message)
+
+    def send_raw(self, message: str) -> None:
+        self.ws.send(message)
+
+    def _get_quote_fields(self) -> list[str]:
+        return [
+            "ch",
+            "chp",
+            "current_session",
+            "description",
+            "local_description",
+            "language",
+            "exchange",
+            "fractional",
+            "is_tradable",
+            "lp",
+            "lp_time",
+            "minmov",
+            "minmove2",
+            "original_name",
+            "pricescale",
+            "pro_name",
+            "short_name",
+            "type",
+            "update_mode",
+            "volume",
+            "currency_code",
+            "rchp",
+            "rtc",
+        ]
+
+    def _initialize_sessions(self, quote_session: str, chart_session: str) -> None:
+        self.send_message("set_auth_token", ["unauthorized_user_token"])
+        self.send_message("set_locale", ["en", "US"])
+        self.send_message("chart_create_session", [chart_session, ""])
+        self.send_message("quote_create_session", [quote_session])
+        self.send_message(
+            "quote_set_fields", [quote_session, *self._get_quote_fields()]
+        )
+        self.send_message("quote_hibernate_all", [quote_session])
+
+    def _add_symbol_to_sessions(
+        self, quote_session: str, chart_session: str, exchange_symbol: str
+    ) -> None:
+        resolve_symbol = json.dumps({"adjustment": "splits", "symbol": exchange_symbol})
+        self.send_message("quote_add_symbols", [quote_session, f"={resolve_symbol}"])
+        self.send_message(
+            "resolve_symbol", [chart_session, "sds_sym_1", f"={resolve_symbol}"]
+        )
+        self.send_message(
+            "create_series", [chart_session, "sds_1", "s1", "sds_sym_1", "1", 10, ""]
+        )
+        self.send_message("quote_fast_symbols", [quote_session, exchange_symbol])
+        self.send_message(
+            "create_study",
+            [
+                chart_session,
+                "st1",
+                "st1",
+                "sds_1",
+                "Volume@tv-basicstudies-246",
+                {"length": 20, "col_prev_close": "false"},
+            ],
+        )
+        self.send_message("quote_hibernate_all", [quote_session])
+
+    def close(self) -> None:
+        try:
+            self.ws.close()
+        except Exception:
+            pass
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -106,10 +218,7 @@ class RealTimePool:
     """Single TradingView websocket connection shared across quote requests."""
 
     def __init__(self) -> None:
-        if RealTimeData is None:
-            raise RuntimeError("tradingview_scraper RealTimeData is not available")
-
-        self._rtd = RealTimeData()
+        self._socket = _TradingViewSocket()
         self._commands: Queue[tuple[str, _QuoteRequest | None]] = Queue()
         self._pending: dict[str, _QuoteRequest] = {}
         self._lock = threading.Lock()
@@ -118,8 +227,8 @@ class RealTimePool:
         self._thread.start()
 
     def _send_request_setup(self, request: _QuoteRequest) -> None:
-        self._rtd._initialize_sessions(request.quote_session, request.chart_session)
-        self._rtd._add_symbol_to_sessions(
+        self._socket._initialize_sessions(request.quote_session, request.chart_session)
+        self._socket._add_symbol_to_sessions(
             request.quote_session,
             request.chart_session,
             request.symbol,
@@ -214,7 +323,7 @@ class RealTimePool:
 
         if _HEARTBEAT_RE.fullmatch(raw_message):
             try:
-                self._rtd.ws.send(raw_message)
+                self._socket.send_raw(raw_message)
             except Exception as exc:
                 logger.debug("[tradingview] heartbeat ack failed: %r", exc)
             return
@@ -222,7 +331,7 @@ class RealTimePool:
         for item in (part for part in _MESSAGE_SPLIT_RE.split(raw_message) if part):
             if _HEARTBEAT_RE.fullmatch(item):
                 try:
-                    self._rtd.ws.send(item)
+                    self._socket.send_raw(item)
                 except Exception as exc:
                     logger.debug("[tradingview] heartbeat ack failed: %r", exc)
                 continue
@@ -263,8 +372,10 @@ class RealTimePool:
                     self._finish_request(request, error=exc)
 
             try:
-                raw_message = self._rtd.ws.recv()
+                raw_message = self._socket.ws.recv()
             except Exception as exc:
+                if not self._running:
+                    break
                 logger.debug("[tradingview] recv error: %r", exc)
                 time.sleep(0.1)
                 continue
@@ -277,12 +388,14 @@ class RealTimePool:
                 continue
 
         try:
-            self._rtd.ws.close()
+            self._socket.close()
         except Exception:
             pass
 
     def _request_session_ids(self) -> tuple[str, str]:
-        return self._rtd.generate_session("qs_"), self._rtd.generate_session("cs_")
+        return self._socket.generate_session("qs_"), self._socket.generate_session(
+            "cs_"
+        )
 
     def get_quote_sync(
         self, symbol: str, asset_hint: str | None = None, timeout: float = 6.0
