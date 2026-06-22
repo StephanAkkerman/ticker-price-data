@@ -62,6 +62,7 @@ class _TradingViewSocket:
         self.ws = create_connection(
             _TV_WS_URL, headers=_TV_REQUEST_HEADERS, timeout=1.0
         )
+        self.ws.settimeout(0.05)
 
     @staticmethod
     def generate_session(prefix: str) -> str:

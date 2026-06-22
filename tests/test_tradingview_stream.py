@@ -1,6 +1,7 @@
 import threading
 import types
 from queue import Queue
+from unittest.mock import MagicMock
 
 import ticker_price_data.tradingview_stream as tvs
 from ticker_price_data.tradingview_stream import RealTimePool, _QuoteRequest
@@ -48,6 +49,17 @@ def test_realtime_pool_init_defers_socket_connection(monkeypatch):
     pool = RealTimePool()
 
     assert pool._socket is None
+
+
+def test_tradingview_socket_sets_short_recv_timeout(monkeypatch):
+    fake_ws = MagicMock()
+    monkeypatch.setattr(tvs, "create_connection", MagicMock(return_value=fake_ws))
+
+    socket = tvs._TradingViewSocket()
+
+    tvs.create_connection.assert_called_once()
+    fake_ws.settimeout.assert_called_once_with(0.05)
+    assert socket.ws is fake_ws
 
 
 def test_realtime_pool_close_is_null_safe():
