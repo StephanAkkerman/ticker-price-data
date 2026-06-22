@@ -54,7 +54,9 @@ async def _best_effort(ticker: str) -> Optional[dict]:
     return await get_crypto_info(ticker)
 
 
-async def price_from_classification(classification: Mapping[str, Any]) -> Optional[dict]:
+async def price_from_classification(
+    classification: Mapping[str, Any],
+) -> Optional[dict]:
     """Fetch a quote for an already-classified symbol.
 
     Routes crypto to CoinGecko and everything else to Yahoo (using
@@ -81,7 +83,9 @@ async def price_from_classification(classification: Mapping[str, Any]) -> Option
     return await get_stock_info(lookup)
 
 
-async def _quote_for_classification(classification: dict, ticker: str) -> Optional[dict]:
+async def _quote_for_classification(
+    classification: dict, ticker: str
+) -> Optional[dict]:
     """Route an auto-classified result, falling back to best-effort if unknown."""
     category = str(classification.get("category") or "").upper()
 

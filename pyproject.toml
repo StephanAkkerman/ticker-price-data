@@ -12,6 +12,7 @@ authors = [{ name = "Stephan Akkerman" }]
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp",
+    "exchange-calendars",
     "tradingview-scraper>=0.4.20",
     "ticker-classifier>=0.1.4",
 ]

@@ -232,7 +232,9 @@ async def test_price_from_classification_crypto_uses_crypto_info():
         "ticker_price_data.router.get_crypto_info",
         new=AsyncMock(return_value=CRYPTO_QUOTE),
     ) as mock_crypto:
-        result = await price_from_classification({"category": "CRYPTO", "ticker": "BTC"})
+        result = await price_from_classification(
+            {"category": "CRYPTO", "ticker": "BTC"}
+        )
 
     mock_crypto.assert_awaited_once_with("BTC")
     assert result == CRYPTO_QUOTE

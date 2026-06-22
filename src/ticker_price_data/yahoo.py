@@ -5,6 +5,7 @@ from typing import Optional
 
 import aiohttp
 
+from .market_session import get_us_stock_session
 from .tradingview_quote import get_tradingview_quote
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ def _reset_cache_for_tests() -> None:
 
 
 async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{lookup_symbol}"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{lookup_symbol}?range=1d&interval=1m&includePrePost=true"
     timeout = aiohttp.ClientTimeout(total=8)
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -114,12 +115,14 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
     meta = chart.get("meta", {})
     quote = chart.get("indicators", {}).get("quote", [{}])[0]
 
-    current_price = _last_non_null(quote.get("close"))
+    current_price = meta.get("regularMarketPrice")
     if current_price is None:
-        current_price = meta.get("regularMarketPrice")
+        current_price = _last_non_null(quote.get("close"))
 
     if current_price is None:
         return None
+
+    ext_price_raw = _last_non_null(quote.get("close"))
 
     prev_close = meta.get("previousClose")
     if prev_close is None:
@@ -131,14 +134,53 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
 
     volume = meta.get("regularMarketVolume", 0) * current_price if current_price else 0
 
-    return {
+    payload: dict = {
         "price": current_price,
         "last_close": prev_close,
         "change_percent": change,
         "volume": volume,
         "website": f"https://finance.yahoo.com/quote/{lookup_symbol}",
         "source": "yahoo",
+        "_ext_price": ext_price_raw,
     }
+
+    return payload
+
+
+def _inject_session(payload: Optional[dict]) -> Optional[dict]:
+    """Return a copy of payload with current session and extended-hours fields added.
+
+    Strips the private _ext_price key and injects session, extended_price,
+    extended_change_percent based on the current time. Extended fields are shown
+    whenever session is not "regular" and the extended price differs from the
+    regular close — this keeps after-hours data visible through weekends/holidays
+    until pre-market begins.
+
+    Returns None unchanged (negative cache pass-through). Non-yahoo payloads
+    (e.g. TradingView fallback) are returned unmodified — session is yahoo-only.
+    """
+    if payload is None:
+        return None
+    if payload.get("source") != "yahoo":
+        return payload
+    result = dict(payload)
+    ext_price = result.pop("_ext_price", None)
+
+    session = get_us_stock_session()
+    result["session"] = session
+
+    price = result.get("price")
+    if (
+        session != "regular"
+        and ext_price is not None
+        and price
+        and price != 0
+        and ext_price != price
+    ):
+        result["extended_price"] = ext_price
+        result["extended_change_percent"] = (ext_price - price) / price * 100
+
+    return result
 
 
 async def get_stock_info(ticker: str) -> Optional[dict]:
@@ -148,13 +190,13 @@ async def get_stock_info(ticker: str) -> Optional[dict]:
 
     found, cached = await _get_cached(symbol, allow_stale=False)
     if found:
-        return cached
+        return _inject_session(cached)
 
     async with _REQUEST_SEMAPHORE:
         # Re-check cache while waiting in the queue.
         found, cached = await _get_cached(symbol, allow_stale=False)
         if found:
-            return cached
+            return _inject_session(cached)
 
         try:
             for lookup_symbol in _lookup_candidates(symbol):
@@ -165,14 +207,14 @@ async def get_stock_info(ticker: str) -> Optional[dict]:
                 await _set_cached(symbol, payload)
                 if lookup_symbol != symbol:
                     await _set_cached(lookup_symbol, payload)
-                return payload
+                return _inject_session(payload)
         except Exception as exc:
             logger.debug("[yahoo] %s fetch failed: %r", symbol, exc)
 
         found, stale = await _get_cached(symbol, allow_stale=True)
         if found:
             logger.info("[yahoo] serving stale cache for %s", symbol)
-            return stale
+            return _inject_session(stale)
 
         tradingview_payload = await get_tradingview_quote(symbol, asset_hint="stock")
         if tradingview_payload is not None:
