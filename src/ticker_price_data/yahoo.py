@@ -147,7 +147,7 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
     return payload
 
 
-def _inject_session(payload: dict) -> dict:
+def _inject_session(payload: Optional[dict]) -> Optional[dict]:
     """Return a copy of payload with current session and extended-hours fields added.
 
     Strips the private _ext_price key and injects session, extended_price,
@@ -155,7 +155,14 @@ def _inject_session(payload: dict) -> dict:
     whenever session is not "regular" and the extended price differs from the
     regular close — this keeps after-hours data visible through weekends/holidays
     until pre-market begins.
+
+    Returns None unchanged (negative cache pass-through). Non-yahoo payloads
+    (e.g. TradingView fallback) are returned unmodified — session is yahoo-only.
     """
+    if payload is None:
+        return None
+    if payload.get("source") != "yahoo":
+        return payload
     result = dict(payload)
     ext_price = result.pop("_ext_price", None)
 

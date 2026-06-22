@@ -161,6 +161,48 @@ async def test_get_stock_info_uses_tradingview_fallback_when_yahoo_unavailable()
 
 
 @pytest.mark.asyncio
+async def test_inject_session_skips_none_payload():
+    # Negative cache: second lookup for an invalid symbol must return None, not TypeError
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(404, {})),
+    ):
+        first = await get_stock_info("INVALID_XYZ")
+        assert first is None
+        # Cache now holds None for this symbol; second call must not raise
+        second = await get_stock_info("INVALID_XYZ")
+        assert second is None
+
+
+@pytest.mark.asyncio
+async def test_inject_session_skips_non_yahoo_payload():
+    # TradingView fallback cached then served on second call must not gain session field
+    tv_fallback = {
+        "price": 185.5,
+        "change_percent": 0.9,
+        "volume": 12_000_000.0,
+        "website": "https://www.tradingview.com/symbols/NASDAQ-AAPL/",
+        "source": "tradingview",
+    }
+    with (
+        patch(
+            "ticker_price_data.yahoo.aiohttp.ClientSession",
+            mock_session(mock_response(429, {}), mock_response(429, {})),
+        ),
+        patch(
+            "ticker_price_data.yahoo.get_tradingview_quote",
+            new=AsyncMock(return_value=tv_fallback),
+        ),
+    ):
+        first = await get_stock_info("AAPL")
+        assert first == tv_fallback
+        assert "session" not in first
+        second = await get_stock_info("AAPL")
+        assert second == tv_fallback
+        assert "session" not in second
+
+
+@pytest.mark.asyncio
 async def test_session_field_present_during_regular_hours():
     with (
         patch(
