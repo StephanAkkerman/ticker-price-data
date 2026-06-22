@@ -29,10 +29,16 @@ All helpers return `Optional[dict]`:
     "change_percent": float,
     "volume": float,
     "website": str,
-    "source": str,            # "yahoo" | "coingecko" | "tradingview"
-    # yahoo also includes "last_close": float | None
+    "source": str,                      # "yahoo" | "coingecko" | "tradingview"
+    # yahoo only:
+    "last_close": float | None,         # previous day's regular-session close
+    "session": str,                     # "regular" | "pre-market" | "after-hours" | "closed"
+    "extended_price": float,            # pre/after-hours price (omitted when session == "regular")
+    "extended_change_percent": float,   # (extended_price − price) / price × 100 (omitted when session == "regular")
 }
 ```
+
+`extended_price` and `extended_change_percent` persist from the end of after-hours (8 pm ET) through weekends and holidays until pre-market opens (4 am ET) on the next trading day.
 
 ## Installation ⚙️
 
