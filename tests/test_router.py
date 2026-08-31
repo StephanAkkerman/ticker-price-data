@@ -138,6 +138,12 @@ async def test_get_ticker_equity_merges_metadata_and_quote():
             "sector": "Technology",
             "industry": "Consumer Electronics",
             "company_profile": {"sector": "Technology"},
+            "fundamentals": {
+                "market_cap": 3_000_000_000_000,
+                "forward_pe": 30.7,
+                "avg_volume": 54_321_000,
+                "currency": "USD",
+            },
             "yahoo_lookup": "AAPL",
             "alternatives": [],
         }
@@ -156,6 +162,12 @@ async def test_get_ticker_equity_merges_metadata_and_quote():
     assert result["sector"] == "Technology"
     assert result["industry"] == "Consumer Electronics"
     assert result["company_profile"] == {"sector": "Technology"}
+    assert result["fundamentals"] == {
+        "market_cap": 3_000_000_000_000,
+        "forward_pe": 30.7,
+        "avg_volume": 54_321_000,
+        "currency": "USD",
+    }
     assert result["quote"] == STOCK_QUOTE
     # TickerInfo exposes our own shape, not raw classifier internals.
     assert "yahoo_lookup" not in result
@@ -195,6 +207,7 @@ async def test_get_ticker_unknown_classification_best_effort():
     assert result["category"] == "UNKNOWN"
     assert result["ticker"] == "XYZ"
     assert result["sector"] is None
+    assert result["fundamentals"] is None
     assert result["quote"] == CRYPTO_QUOTE
 
 

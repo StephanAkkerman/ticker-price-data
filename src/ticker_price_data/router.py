@@ -108,6 +108,7 @@ def _build_ticker_info(
         "sector": classification.get("sector"),
         "industry": classification.get("industry"),
         "company_profile": classification.get("company_profile"),
+        "fundamentals": classification.get("fundamentals"),
         "alternatives": classification.get("alternatives") or [],
         "quote": quote,
     }
@@ -161,7 +162,7 @@ async def get_ticker(ticker: str, *, classifier=None) -> Optional[dict]:
     Classifies the symbol once (via ``ticker_classifier``), routes to the
     appropriate price source, and merges the result into a single ``TickerInfo``
     dict containing identity/metadata (sector, industry, market cap, company
-    profile, ...) alongside the live ``quote``.
+    profile, fundamentals, ...) alongside the live ``quote``.
 
     Parameters
     ----------

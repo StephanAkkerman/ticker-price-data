@@ -34,6 +34,23 @@ class Quote(TypedDict, total=False):
     ]  # (extended_price − price) / price × 100; yahoo + tradingview realtime
 
 
+class Fundamentals(TypedDict, total=False):
+    """Slow-moving valuation/volume metrics from the classifier's Yahoo quote.
+
+    Every field is optional: only what the upstream quote actually reported is
+    present, so consumers must treat missing keys as "unknown" rather than zero.
+    """
+
+    market_cap: float
+    forward_pe: float
+    trailing_pe: float
+    eps_forward: float
+    eps_trailing: float
+    avg_volume: float  # 3-month average daily volume, in shares
+    avg_volume_10d: float  # 10-day average daily volume, in shares
+    currency: str
+
+
 class TickerInfo(TypedDict, total=False):
     """Everything known about a ticker: classification metadata + live quote."""
 
@@ -44,11 +61,13 @@ class TickerInfo(TypedDict, total=False):
     sector: Optional[str]
     industry: Optional[str]
     company_profile: Optional[dict[str, Any]]
+    fundamentals: Optional[Fundamentals]
     alternatives: list[str]
     quote: Optional[Quote]
 
 
 __all__ = [
+    "Fundamentals",
     "Quote",
     "TickerInfo",
     "get_price",
