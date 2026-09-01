@@ -40,6 +40,12 @@ _MESSAGE_SPLIT_RE = re.compile(r"~m~\d+~m~")
 
 _TV_WS_URL = "wss://data.tradingview.com/socket.io/websocket?from=screener%2F"
 _CONNECT_RETRY_DELAY_SECONDS = 1.0
+# Backoff ceiling. Without one, an unreachable TradingView produced a retry
+# every second for the life of the process — ~70k warning lines a day.
+_MAX_CONNECT_RETRY_DELAY_SECONDS = 30.0
+# How long the worker parks when there is nothing to serve. Local sleep only:
+# no socket is opened until a caller actually asks for a quote.
+_IDLE_POLL_SECONDS = 0.05
 _TV_REQUEST_HEADERS = {
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "en-US,en;q=0.9,fa;q=0.8",
@@ -229,6 +235,7 @@ class RealTimePool:
         self._pending: dict[str, _QuoteRequest] = {}
         self._lock = threading.Lock()
         self._running = True
+        self._retry_delay = _CONNECT_RETRY_DELAY_SECONDS
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -403,12 +410,63 @@ class RealTimePool:
 
             self._handle_packet(packet)
 
+    def _has_waiters(self) -> bool:
+        """True when some caller is waiting on a quote.
+
+        The worker used to reconnect on a timer regardless, so one failed
+        lookup left it hammering an unreachable host forever. Connecting is now
+        driven by demand.
+        """
+        with self._lock:
+            if self._pending:
+                return True
+        return not self._commands.empty()
+
+    def _discard_abandoned_commands(self) -> None:
+        """Drop queued requests whose caller has already given up.
+
+        A request that times out is completed by `get_quote_sync`, but its
+        command stays queued if the worker never dequeued it. Without this the
+        queue never empties while disconnected, and `_has_waiters` would report
+        work forever.
+        """
+        if self._commands.empty():
+            return
+
+        survivors: list[tuple[str, _QuoteRequest | None]] = []
+        while True:
+            try:
+                cmd, request = self._commands.get_nowait()
+            except Empty:
+                break
+            if cmd == "add" and request is not None and request.event.is_set():
+                continue
+            survivors.append((cmd, request))
+
+        for item in survivors:
+            self._commands.put(item)
+
     def _run(self) -> None:
         while self._running:
             if self._socket is None:
-                if not self._connect_socket():
-                    time.sleep(_CONNECT_RETRY_DELAY_SECONDS)
+                # Drop requests nobody is waiting on before deciding whether a
+                # connection is warranted, so an abandoned one never triggers
+                # another attempt.
+                self._discard_abandoned_commands()
+
+                # Nothing to serve: park without touching the network.
+                if not self._has_waiters():
+                    time.sleep(_IDLE_POLL_SECONDS)
                     continue
+
+                if not self._connect_socket():
+                    time.sleep(self._retry_delay)
+                    self._retry_delay = min(
+                        self._retry_delay * 2, _MAX_CONNECT_RETRY_DELAY_SECONDS
+                    )
+                    continue
+
+                self._retry_delay = _CONNECT_RETRY_DELAY_SECONDS
 
             try:
                 cmd, request = self._commands.get(timeout=0.05)

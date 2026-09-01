@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ticker-price-data"
-version = "0.1.3"
+version = "0.1.4"
 description = "Unified ticker price data from Yahoo Finance, CoinGecko, and TradingView."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -43,6 +43,16 @@ profile = "black"
 
 [tool.ruff]
 line-length = 88
+# 0.16 added Markdown to the default discovery set, so the formatter started
+# rewriting the Python code block in README.md. Restrict it to Python, as before.
+include = ["*.py", "*.pyi", "**/pyproject.toml"]
+
+[tool.ruff.lint]
+# Pinned rather than inherited: ruff's default rule set widened in 0.16, turning
+# a clean tree into 85 findings with no code change. These four are what this
+# codebase is clean against. Adopting the wider set is worth doing on its own
+# terms, not as a silent CI break.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
