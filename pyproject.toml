@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ticker-price-data"
-version = "0.1.4"
+dynamic = ["version"]
 description = "Unified ticker price data from Yahoo Finance, CoinGecko, and TradingView."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -23,6 +23,11 @@ dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [project.urls]
 Homepage = "https://github.com/StephanAkkerman/ticker-price-data"
+
+# Single source of truth for the version: the package's `_version.py`.
+# A release bumps that one literal; hatchling reads it, so the two cannot drift.
+[tool.hatch.version]
+path = "src/ticker_price_data/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ticker_price_data"]
