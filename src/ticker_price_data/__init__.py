@@ -2,6 +2,7 @@
 
 from typing import Any, Optional, TypedDict
 
+from ._version import __version__
 from .coingecko import get_crypto_info
 from .router import (
     get_price,
@@ -12,8 +13,6 @@ from .router import (
 from .tradingview_quote import get_tradingview_quote
 from .tradingview_stream import RealTimePool, close_shared_pool, get_shared_pool
 from .yahoo import get_stock_info
-
-__version__ = "0.1.3"
 
 
 class Quote(TypedDict, total=False):
@@ -50,6 +49,7 @@ class TickerInfo(TypedDict, total=False):
 
 __all__ = [
     "Quote",
+    "__version__",
     "TickerInfo",
     "get_price",
     "get_ticker",
