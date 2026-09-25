@@ -1,4 +1,6 @@
 # ticker-price-data
+![PyPI](https://img.shields.io/pypi/v/ticker-price-data?label=pypi%20package)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/ticker-price-data)
 
 Unified ticker price data from **Yahoo Finance** (stocks/indices/forex/futures),
 **CoinGecko** (crypto), and **TradingView** (universal fallback).
