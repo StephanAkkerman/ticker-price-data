@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -145,6 +146,116 @@ async def _fetch_yahoo_chart(lookup_symbol: str) -> Optional[dict]:
     }
 
     return payload
+
+
+def _as_float(value: object) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result == result else None  # drop NaN
+
+
+def _parse_history(payload: dict, *, intraday: bool) -> Optional[list[dict]]:
+    result = (payload.get("chart") or {}).get("result")
+    if not result:
+        return None
+
+    chart = result[0]
+    timestamps = chart.get("timestamp") or []
+    quote = ((chart.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
+
+    points: list[dict] = []
+    for index, ts in enumerate(timestamps):
+        close = _as_float(closes[index] if index < len(closes) else None)
+        if close is None:
+            continue
+
+        moment = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        high = _as_float(highs[index] if index < len(highs) else None)
+        low = _as_float(lows[index] if index < len(lows) else None)
+        points.append(
+            {
+                "t": moment.isoformat() if intraday else moment.date().isoformat(),
+                "close": close,
+                "high": high if high is not None else close,
+                "low": low if low is not None else close,
+            }
+        )
+
+    return points or None
+
+
+async def get_price_history(
+    ticker: str, *, range_: str = "1d", interval: str = "1m"
+) -> Optional[list[dict]]:
+    """Fetch a raw price series from the Yahoo Finance chart endpoint.
+
+    Unlike :func:`get_stock_info` (a single current quote), this returns the
+    full series of points for the given Yahoo ``range``/``interval`` pair —
+    e.g. a full trading day at 1-minute resolution, the same data Yahoo
+    Finance's own charts (and sparklines) are drawn from. Works for any symbol
+    ``get_stock_info`` does, including crypto looked up as ``"BTC-USD"``.
+
+    Parameters
+    ----------
+    ticker : str
+        The symbol to look up (``"AAPL"``, ``"BTC-USD"``, ``"SPX"``, ...).
+    range_ : str, optional
+        Yahoo ``range`` query parameter, e.g. ``"1d"``, ``"5d"``, ``"1mo"``,
+        ``"1y"``, ``"max"``. Default ``"1d"``.
+    interval : str, optional
+        Yahoo ``interval`` query parameter, e.g. ``"1m"``, ``"5m"``, ``"1h"``,
+        ``"1d"``. Default ``"1m"``. Sub-daily intervals only return data for
+        recent ranges; Yahoo rejects ones outside what it retains.
+
+    Returns
+    -------
+    list[dict] | None
+        Chronological ``{"t", "close", "high", "low"}`` points (``t`` is an
+        ISO timestamp for intraday intervals, an ISO date otherwise), or
+        ``None`` when no data could be resolved for any lookup candidate.
+    """
+    symbol = _normalize_symbol(ticker)
+    if not symbol:
+        return None
+
+    intraday = interval.endswith(("m", "h"))
+    timeout = aiohttp.ClientTimeout(total=8)
+
+    async with _REQUEST_SEMAPHORE:
+        for lookup_symbol in _lookup_candidates(symbol):
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{lookup_symbol}"
+            params = {"range": range_, "interval": interval}
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(
+                        url, params=params, headers=headers
+                    ) as response:
+                        if response.status != 200:
+                            if response.status == 429:
+                                logger.info(
+                                    "[yahoo] history rate-limited for %s",
+                                    lookup_symbol,
+                                )
+                            continue
+                        data = await response.json()
+            except Exception as exc:
+                logger.debug(
+                    "[yahoo] history fetch failed for %s: %r", lookup_symbol, exc
+                )
+                continue
+
+            points = _parse_history(data, intraday=intraday)
+            if points is not None:
+                return points
+
+    return None
 
 
 def _inject_session(payload: Optional[dict]) -> Optional[dict]:

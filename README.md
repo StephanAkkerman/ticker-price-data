@@ -15,6 +15,9 @@ caching.
   metadata (sector, industry, market cap, company profile, fundamentals, ...) **plus** the live quote,
   classifying only once.
 - `get_stock_info(ticker)` — Yahoo Finance, with a TradingView fallback.
+- `get_price_history(ticker, range_, interval)` — raw Yahoo Finance chart series (any
+  `range`/`interval` Yahoo supports, e.g. a full trading day at 1-minute resolution) for
+  drawing detailed price lines/sparklines. Works for crypto too via `"BTC-USD"`-style symbols.
 - `get_crypto_info(ticker)` — CoinGecko via the website `search_v2` endpoint (avoids the
   public API's free-tier rate limits), with Yahoo → TradingView fallbacks.
 - `get_tradingview_quote(symbol, asset_hint)` — realtime websocket pool + scraper fallback.
@@ -56,13 +59,20 @@ pip install -e .
 
 ```python
 import asyncio
-from ticker_price_data import get_price, get_ticker, get_stock_info, get_crypto_info
+from ticker_price_data import (
+    get_price,
+    get_ticker,
+    get_stock_info,
+    get_crypto_info,
+    get_price_history,
+)
 
 async def main():
     print(await get_stock_info("AAPL"))     # Yahoo
     print(await get_crypto_info("BTC"))     # CoinGecko
     print(await get_price("BTC", "auto"))   # classified automatically
     print(await get_ticker("AAPL"))         # metadata (sector, industry, ...) + quote
+    print(await get_price_history("BTC-USD", range_="1d", interval="1m"))  # intraday series
 
 asyncio.run(main())
 ```

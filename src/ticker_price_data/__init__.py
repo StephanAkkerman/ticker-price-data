@@ -12,7 +12,7 @@ from .router import (
 )
 from .tradingview_quote import get_tradingview_quote
 from .tradingview_stream import RealTimePool, close_shared_pool, get_shared_pool
-from .yahoo import get_stock_info
+from .yahoo import get_price_history, get_stock_info
 
 
 class Quote(TypedDict, total=False):
@@ -75,6 +75,7 @@ __all__ = [
     "price_from_classification",
     "get_shared_classifier",
     "get_stock_info",
+    "get_price_history",
     "get_crypto_info",
     "get_tradingview_quote",
     "RealTimePool",

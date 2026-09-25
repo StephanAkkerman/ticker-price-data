@@ -4,7 +4,7 @@ import pytest
 from helpers import mock_response, mock_session
 
 import ticker_price_data.yahoo as yahoo_service
-from ticker_price_data.yahoo import get_stock_info
+from ticker_price_data.yahoo import get_price_history, get_stock_info
 
 YAHOO_RESPONSE = {
     "chart": {
@@ -359,6 +359,169 @@ async def test_pre_market_no_extended_price_when_candle_matches_regular():
     assert result["session"] == "pre-market"
     assert "extended_price" not in result
     assert "extended_change_percent" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_success():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1700000000, 1700000060, 1700000120],
+                    "indicators": {
+                        "quote": [
+                            {
+                                "close": [185.0, 185.5, 186.0],
+                                "high": [185.2, 185.7, 186.2],
+                                "low": [184.8, 185.3, 185.8],
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+    }
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(200, data)),
+    ):
+        result = await get_price_history("AAPL")
+
+    assert result is not None
+    assert len(result) == 3
+    assert result[0]["close"] == 185.0
+    assert result[0]["high"] == 185.2
+    assert result[0]["low"] == 184.8
+    assert result[-1]["close"] == 186.0
+    # 1m is intraday: "t" carries a full timestamp, not just a date.
+    assert "T" in result[0]["t"]
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_missing_symbol_returns_none():
+    result = await get_price_history("")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_http_error_returns_none():
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(404, {})),
+    ):
+        result = await get_price_history("AAPL")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_exception_returns_none():
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        side_effect=Exception("Network error"),
+    ):
+        result = await get_price_history("AAPL")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_uses_lookup_override_for_dxy():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1700000000],
+                    "indicators": {"quote": [{"close": [104.1]}]},
+                }
+            ]
+        }
+    }
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(200, data)),
+    ):
+        result = await get_price_history("DXY")
+
+    assert result is not None
+    assert result[0]["close"] == 104.1
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_falls_back_through_lookup_candidates():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1700000000],
+                    "indicators": {"quote": [{"close": [104.1]}]},
+                }
+            ]
+        }
+    }
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        # DX-Y.NYB (the override) fails, DXY (the plain symbol) succeeds.
+        mock_session(mock_response(404, {}), mock_response(200, data)),
+    ):
+        result = await get_price_history("DXY")
+
+    assert result is not None
+    assert result[0]["close"] == 104.1
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_daily_interval_uses_date_only():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1700000000],
+                    "indicators": {"quote": [{"close": [185.0]}]},
+                }
+            ]
+        }
+    }
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(200, data)),
+    ):
+        result = await get_price_history("AAPL", range_="1y", interval="1d")
+
+    assert result is not None
+    assert "T" not in result[0]["t"]
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_skips_null_closes():
+    data = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1700000000, 1700000060, 1700000120],
+                    "indicators": {"quote": [{"close": [185.0, None, 186.0]}]},
+                }
+            ]
+        }
+    }
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(200, data)),
+    ):
+        result = await get_price_history("AAPL")
+
+    assert result is not None
+    assert len(result) == 2
+    assert [p["close"] for p in result] == [185.0, 186.0]
+
+
+@pytest.mark.asyncio
+async def test_get_price_history_empty_result_returns_none():
+    data = {"chart": {"result": None}}
+    with patch(
+        "ticker_price_data.yahoo.aiohttp.ClientSession",
+        mock_session(mock_response(200, data)),
+    ):
+        result = await get_price_history("INVALID")
+    assert result is None
 
 
 @pytest.mark.asyncio
