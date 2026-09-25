@@ -12,7 +12,7 @@ caching.
   [ticker-classifier](https://github.com/StephanAkkerman/ticker-classifier) to decide
   stock vs crypto vs forex automatically.
 - `get_ticker(ticker)` — everything known about a symbol in one call: classification
-  metadata (sector, industry, market cap, company profile, ...) **plus** the live quote,
+  metadata (sector, industry, market cap, company profile, fundamentals, ...) **plus** the live quote,
   classifying only once.
 - `get_stock_info(ticker)` — Yahoo Finance, with a TradingView fallback.
 - `get_crypto_info(ticker)` — CoinGecko via the website `search_v2` endpoint (avoids the
